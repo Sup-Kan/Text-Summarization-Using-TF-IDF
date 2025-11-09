@@ -2,7 +2,6 @@
 data/raw/*
 
 # Ignore source files
-src/preprocessing/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
