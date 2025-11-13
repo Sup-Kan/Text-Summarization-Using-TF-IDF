@@ -1,2 +1,6 @@
 requests==2.32.3
 beautifulsoup4==4.14.2
+vncorenlp==1.0.3
+numpy==2.3.4
+scikit_learn==1.7.2
+tqdm==4.67.1

@@ -26,7 +26,7 @@ RETRY_DELAY = 5
 
 # Paths
 BASE_DATA_DIR = 'data/raw'
-LOG_BASE_DIR = 'logs'
+LOG_BASE_DIR = 'logs/crawling'
 
 # Date format cho thư mục
 DATE_FORMAT = '%Y-%m-%d'  # Format: YYYY-MM-DD
