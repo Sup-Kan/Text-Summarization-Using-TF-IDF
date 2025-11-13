@@ -1,180 +1,188 @@
-"""
-Utility functions
-"""
+"""Crawling utilities"""
 
 import re
+import csv
 import logging
-import sys
+import unicodedata
 from pathlib import Path
-from functools import wraps
-import time
 from datetime import datetime
 
-# Global logger instance
-_logger = None
+logger = logging.getLogger(__name__)
+
+
+# ==================== LOGGING ====================
 
 def setup_logging(log_dir):
-    """
-    Setup logging configuration - PHẢI GỌI ĐẦU TIÊN.
-    """
-    global _logger
-    
-    # Create log directory
+    """Setup logging configuration."""
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     log_file = Path(log_dir) / 'crawler.log'
     
-    # Clear any existing handlers
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Create formatters
-    file_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    console_formatter = logging.Formatter(
-        '%(levelname)s: %(message)s'
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler()
+        ]
     )
     
-    # File handler
-    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(file_formatter)
-    
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(console_formatter)
-    
-    # Configure root logger
-    root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
-    
-    # Create module logger
-    _logger = logging.getLogger('news_crawler')
-    _logger.setLevel(logging.DEBUG)
-    
-    # Test logging
-    _logger.info("=" * 80)
-    _logger.info("Logging system initialized")
-    _logger.info(f"Log file: {log_file.absolute()}")
-    _logger.info("=" * 80)
-    
-    # Verify file was created
-    if log_file.exists():
-        print(f"✓ Log file created: {log_file.absolute()}")
-    else:
-        print(f"✗ WARNING: Log file not created at {log_file.absolute()}")
-    
-    return _logger
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized: {log_file}")
+    return logger
 
-def get_logger(name=None):
-    """Get logger instance."""
-    if name:
-        return logging.getLogger(name)
-    return logging.getLogger('news_crawler')
 
-def create_latest_symlink(base_dir, today_dir):
-    """
-    Tạo symlink 'latest' trỏ đến thư mục mới nhất.
+# ==================== TEXT NORMALIZATION ====================
+
+def remove_vietnamese_accents(text):
+    """Remove Vietnamese accents."""
+    if not text:
+        return text
     
-    Args:
-        base_dir: Thư mục gốc (ví dụ: /content/data/raw)
-        today_dir: Tên thư mục ngày hôm nay (ví dụ: 2025-11-09)
-    """
-    logger = get_logger()
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(char for char in text if unicodedata.category(char) != 'Mn')
     
-    try:
-        base_path = Path(base_dir)
-        today_path = base_path / today_dir
-        latest_link = base_path / 'latest'
+    vietnamese_map = {'đ': 'd', 'Đ': 'D'}
+    for viet_char, latin_char in vietnamese_map.items():
+        text = text.replace(viet_char, latin_char)
+    
+    return text
+
+
+def normalize_category_name(name):
+    """Normalize category name: 'Chính trị' -> 'chinh_tri'"""
+    if not name:
+        return name
+    
+    name = name.lower()
+    name = remove_vietnamese_accents(name)
+    name = re.sub(r'[^\w\s]', ' ', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    name = name.replace(' ', '_')
+    name = re.sub(r'_{2,}', '_', name)
+    
+    return name
+
+
+# ==================== CATEGORY MAPPING ====================
+
+class CategoryMapper:
+    """Manage category name mappings."""
+    
+    def __init__(self, mapping_file='data/category_mapping.csv'):
+        self.mapping_file = Path(mapping_file)
+        self.mappings = {}
+        self.mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        self.load_mappings()
+    
+    def load_mappings(self):
+        """Load mappings from CSV."""
+        if not self.mapping_file.exists():
+            return
         
-        # Xóa symlink cũ nếu có
-        if latest_link.exists() or latest_link.is_symlink():
-            latest_link.unlink()
-            logger.debug(f"Removed old 'latest' symlink")
+        try:
+            with open(self.mapping_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    self.mappings[row['normalized_name']] = {
+                        'original_name': row['original_name'],
+                        'display_name': row['display_name']
+                    }
+            logger.info(f"Loaded {len(self.mappings)} category mappings")
+        except Exception as e:
+            logger.error(f"Error loading mappings: {e}")
+    
+    def save_mappings(self):
+        """Save mappings to CSV."""
+        try:
+            with open(self.mapping_file, 'w', encoding='utf-8', newline='') as f:
+                fieldnames = ['normalized_name', 'original_name', 'display_name']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                
+                for normalized, data in sorted(self.mappings.items()):
+                    writer.writerow({
+                        'normalized_name': normalized,
+                        'original_name': data['original_name'],
+                        'display_name': data['display_name']
+                    })
+            logger.info(f"Saved {len(self.mappings)} mappings")
+        except Exception as e:
+            logger.error(f"Error saving mappings: {e}")
+    
+    def add_category(self, original_name):
+        """Add category mapping."""
+        normalized = normalize_category_name(original_name)
+        display_name = original_name.upper()
         
-        # Tạo symlink mới (relative path)
-        latest_link.symlink_to(today_dir)
-        logger.info(f"Created 'latest' symlink -> {today_dir}")
-        print(f"✓ Created symlink: {latest_link} -> {today_dir}")
+        self.mappings[normalized] = {
+            'original_name': original_name,
+            'display_name': display_name
+        }
         
-    except Exception as e:
-        logger.warning(f"Could not create symlink: {e}")
-        print(f"⚠ Warning: Could not create 'latest' symlink: {e}")
+        return normalized
+    
+    def get_normalized_name(self, original):
+        """Get normalized name."""
+        normalized = normalize_category_name(original)
+        if normalized not in self.mappings:
+            self.add_category(original)
+        return normalized
+    
+    def get_display_name(self, normalized):
+        """Get display name."""
+        return self.mappings.get(normalized, {}).get('display_name', normalized.upper())
 
-def get_crawl_date():
-    """Lấy ngày crawl hiện tại (format: YYYY-MM-DD)."""
-    return datetime.now().strftime('%Y-%m-%d')
 
-def get_crawl_datetime():
-    """Lấy datetime crawl hiện tại (format: YYYY-MM-DD HH:MM:SS)."""
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-def retry(max_attempts=3, delay=5, exceptions=(Exception,)):
-    """Decorator để retry function khi gặp lỗi."""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            logger = get_logger(func.__module__)
-            
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    return func(*args, **kwargs)
-                except exceptions as e:
-                    if attempt == max_attempts:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {str(e)}")
-                        raise
-                    
-                    logger.warning(f"{func.__name__} attempt {attempt}/{max_attempts} failed: {str(e)}. Retrying in {delay}s...")
-                    time.sleep(delay)
-            
-        return wrapper
-    return decorator
-
-def sanitize_filename(name):
-    """Sanitize string for use as filename."""
-    sanitized = re.sub(r'[\x00-\x1F\\/:*?"<>|]', '_', name).strip()
-    sanitized = re.sub(r'_{2,}', '_', sanitized)
-    return sanitized[:100]
-
-def create_directory(base_dir):
-    """Create directory if it doesn't exist."""
-    path = Path(base_dir)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+# ==================== URL & FILE UTILS ====================
 
 def normalize_url(link, base_url):
     """Normalize URL."""
     if not link:
         return None
-    if link.startswith('http://') or link.startswith('https://'):
+    if link.startswith('http'):
         return link
-    link = re.sub(r'^\.+/', '', link)
     
+    link = re.sub(r'^\.+/', '', link)
     if link.startswith('/'):
         return base_url + link
     return base_url + '/' + link
 
-def print_separator():
-    """Print separator line."""
-    print("-" * 80)
 
-def print_progress(message, level=0):
-    """Print progress message with indentation."""
-    indent = "  " * level
-    print(f"{indent}{message}")
-    
-    # Also log to file
-    logger = get_logger()
-    logger.debug(f"{'  ' * level}{message}")
+def sanitize_filename(name):
+    """Sanitize filename."""
+    sanitized = re.sub(r'[\x00-\x1F\\/:*?"<>|]', '_', name).strip()
+    sanitized = re.sub(r'_{2,}', '_', sanitized)
+    return sanitized[:100]
+
+
+def create_directory(path):
+    """Create directory if not exists."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 def extract_date_from_text(text):
-    """Trích xuất ngày tháng từ text."""
+    """Extract date from text."""
     if not text:
         return None
-    date_pattern = r'\d{1,2}/\d{1,2}/\d{4}'
-    match = re.search(date_pattern, text)
+    match = re.search(r'\d{1,2}/\d{1,2}/\d{4}', text)
     return match.group(0) if match else None
+
+
+def get_crawl_datetime():
+    """Get current datetime."""
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+# ==================== PRINT UTILS ====================
+
+def print_separator():
+    """Print separator."""
+    print("="*80)
+
+
+def print_progress(message, level=0):
+    """Print progress with indentation."""
+    indent = "  " * level
+    print(f"{indent}{message}")

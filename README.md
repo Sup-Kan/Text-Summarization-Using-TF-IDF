@@ -1,6 +1,12 @@
-# Automatic-News-Topic-Classification
+# Vietnamese News Crawler & Preprocessor
 
-https://baochinhphu.vn
+Hệ thống thu thập và xử lý dữ liệu tin tức tiếng Việt từ baochinhphu.vn với các tính năng nâng cao.
 
-python -m src.crawling.main
-python -m src.preprocessing.main
+---
+
+!NOTE: Please note that src/preprocessing/ is undergoing refactoring and is temporarily unavailable (*Code trong src/preprocessing/ đang được cấu trúc lại và tạm thời chưa sẵn sàng sử dụng*).
+
+| Directory | Status | Description |
+| :--- | :---: | :--- |
+| `src/models/` | ✅ Active | Main model architecture |
+| `src/preprocessing/` | 🚧 Inactive | Temporarily disabled for updates |
